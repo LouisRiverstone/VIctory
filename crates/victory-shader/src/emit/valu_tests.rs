@@ -838,6 +838,43 @@ fn v_cvt_u16_and_i16_f16_saturate() {
 }
 
 #[test]
+fn v_cvt_f16_from_signed_and_unsigned_words() {
+    // Binary16 encodings for round-to-nearest, ties-to-even.
+    let cases = [
+        (0x0000, 0x0000, 0x0000),
+        (0x0001, 0x3C00, 0x3C00),
+        (0x000F, 0x4B80, 0x4B80),
+        (0x0400, 0x6400, 0x6400),
+        (0x0801, 0x6800, 0x6800), // 2049 ties toward 2048
+        (0x0803, 0x6802, 0x6802), // 2051 ties toward 2052
+        (0x7FFF, 0x7800, 0x7800),
+        (0x8000, 0x7800, 0xF800),
+        (0x8001, 0x7800, 0xF800),
+        (0xFFEF, 0x7BFF, 0xCC40), // 65519 / -17
+        (0xFFF0, 0x7C00, 0xCC00), // 65520 rounds to infinity / -16
+        (0xFFFF, 0x7C00, 0xBC00),
+    ];
+    const INPUT_HIGH: u32 = 0xBEEF_0000;
+    const OUTPUT_HIGH: u32 = 0xA5A5_0000;
+    let inputs: Vec<[u32; 4]> = cases
+        .iter()
+        .map(|&(word, _, _)| [INPUT_HIGH | word, OUTPUT_HIGH, 0, 0])
+        .collect();
+    for (op, signed) in [(0x050, false), (0x051, true)] {
+        let shader = build_valu_cs(&[vop1(0x001, 0, vgpr(2)), vop1(op, 0, vgpr(1))]);
+        run_cases(&shader, &inputs, |backend, i, _, got| {
+            let (word, unsigned_half, signed_half) = cases[i];
+            let want = if signed { signed_half } else { unsigned_half };
+            assert_eq!(
+                got,
+                OUTPUT_HIGH | want,
+                "{backend}: VOP1 {op:#x}, input {word:#06x}"
+            );
+        });
+    }
+}
+
+#[test]
 fn v_sin_and_v_cos_f16_reduce_large_turns() {
     let sin_shader = build_valu_cs(&[vop1(0x060, 0, vgpr(1))]);
     let cos_shader = build_valu_cs(&[vop1(0x061, 0, vgpr(1))]);
